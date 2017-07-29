@@ -2,7 +2,13 @@
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE ViewPatterns      #-}
 
-module Parsing where
+module Parsing
+  ( parseOrg
+  , IssueRecordMap
+  , TimeRecord (..)
+  , Duration
+  , ytParsingCtxTag
+  ) where
 
 import           Control.Monad       (foldM)
 import           Data.Bifunctor      (bimap, second)
@@ -14,9 +20,31 @@ import           Data.Monoid         ((<>))
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import qualified Data.Text.ICU.Regex as R
-import           Data.Time           (Day, UTCTime, defaultTimeLocale, formatTime,
-                                      parseTimeM)
+import           Data.Time           (Day, UTCTime, defaultTimeLocale, parseTimeM)
 import           Text.Read           (readMaybe)
+
+type Duration = Word
+
+data TimeRecord = ClockRecord Text UTCTime UTCTime
+                | TrackRecord Text Day Duration
+  deriving Show
+
+ytParsingCtxTag :: Text
+ytParsingCtxTag = "{yt_timetracking}"
+
+type IssueRecordMap = HM.HashMap Text [TimeRecord]
+
+data ParsingCtx =
+     ParsingCtx
+      { pcYTSection   :: Maybe Int
+      , pcIssueId     :: Maybe (Int, Text)
+      , pcDescription :: Maybe (Int, Text)
+      , pcResult      :: IssueRecordMap
+      , issueRegex    :: R.Regex
+      , clockRegex    :: R.Regex
+      , trackRegex    :: R.Regex
+      }
+
 timeFormats :: [String]
 timeFormats =
   [ "%F %T"
@@ -39,12 +67,12 @@ dayOfWeek =
   , "Sun", "Sunday"
   ]
 
-parseDurationH :: Text -> Maybe Word
+parseDurationH :: Text -> Maybe Duration
 parseDurationH (convertDurPair -> (h, m)) = f <$> h <*> m
   where
     f h m = h * 60 + m
 
-convertDurPair :: Text -> (Maybe Word, Maybe Word)
+convertDurPair :: Text -> (Maybe Duration, Maybe Duration)
 convertDurPair = bimap read' read' .
             second (T.dropWhile (== ':')) .
             T.span (/= ':') .
@@ -88,26 +116,6 @@ trackRegexpText = "TRACK:\\s*(\\S*)\\s*(\\S*)"
 
 clockRegexpText :: Text
 clockRegexpText = "CLOCK:\\s*\\[([^\\]]+)\\]\\s*-{1,}\\s*\\[([^\\]]+)\\]"
-
-data TimeRecord = ClockRecord Text UTCTime UTCTime
-                | TrackRecord Text Day Word
-  deriving Show
-
-ytParsingCtxTag :: Text
-ytParsingCtxTag = "{yt_timetracking}"
-
-type IssueRecordMap = HM.HashMap Text [TimeRecord]
-
-data ParsingCtx =
-     ParsingCtx
-      { pcYTSection   :: Maybe Int
-      , pcIssueId     :: Maybe (Int, Text)
-      , pcDescription :: Maybe (Int, Text)
-      , pcResult      :: IssueRecordMap
-      , issueRegex    :: R.Regex
-      , clockRegex    :: R.Regex
-      , trackRegex    :: R.Regex
-      }
 
 emptyParsingCtx :: R.Regex -> R.Regex -> R.Regex -> ParsingCtx
 emptyParsingCtx = ParsingCtx Nothing Nothing Nothing mempty

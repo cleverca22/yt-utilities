@@ -1,5 +1,5 @@
 #!/usr/bin/env stack
--- stack runghc --package optparse-simple --package shell-conduit --package transformers --package time --package extra --package text-icu --package unordered-containers
+-- stack runghc --package optparse-simple --package shell-conduit --package transformers --package time --package extra --package text-icu --package unordered-containers --package hashable
 
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
@@ -16,6 +16,7 @@ import           System.Exit                (die)
 import           System.FilePath.Posix      ((</>))
 
 import           Parsing                    (parseOrg)
+import           PreProcess                 (preProcess)
 
 main :: IO ()
 main = do
@@ -29,13 +30,12 @@ main = do
 
 deploymentScript :: Options -> Segment ()
 deploymentScript Options{..} = do
-    echo =<< show <$> (liftIO $ parseOrg =<< T.readFile orgFile)
+    echo =<< (show . preProcess) <$> (liftIO $ parseOrg =<< T.readFile orgFile)
 
 -- | CLI-options for deployer.
 data Options = Options
     { --itIsProductionCluster :: Bool
       orgFile :: String
-    , text    :: String
     --, numberOfNodes         :: Int
     --, noBuild               :: Bool
     }
@@ -48,9 +48,6 @@ optionsParser = Options <$>
       strOption (
          long       "org"
       <> metavar    "FILE" )
-      <*> strOption (
-         long       "text"
-      <> metavar    "TIME" )
     -- <*>
     --   option auto (
     --      long       "nodes"
