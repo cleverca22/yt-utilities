@@ -9,6 +9,7 @@
 import           Control.Monad.IO.Class     (liftIO)
 import qualified Data.ByteString.Lazy       as L
 import           Data.Conduit.Shell
+import qualified Data.HashMap.Strict        as HM
 import           Data.Monoid                ((<>))
 import           Data.Text                  (Text)
 import qualified Data.Text.IO               as T
@@ -22,7 +23,8 @@ import           System.FilePath.Posix      ((</>))
 
 import           Parsing                    (Duration, parseOrg)
 import           PreProcess                 (DurationMap, IssueId, preProcess)
-import           Process                    (filterProcess)
+import           Process                    (deleteWorkItem, filterProcess,
+                                             importWorkItems)
 
 main :: IO ()
 main = do
@@ -36,39 +38,35 @@ main = do
 deploymentScript :: Options -> Segment ()
 deploymentScript Options{..} = do
     m <- preProcess <$> (liftIO $ parseOrg =<< T.readFile orgFile)
-    echo $ show m
     manager <- liftIO $ H.newTlsManager
-    m' <- liftIO $ filterProcess manager userName m
-    echo $ show m'
+    m' <- liftIO $ filterProcess manager authToken userName m
+    liftIO $ putStrLn $ "For import to YT: " <> show m'
+    flip mapM_ (HM.toList m') $ \(issueId, (wids, durMap)) -> do
+        echo $ "Processing issue " <> issueId
+        flip mapM_ wids $ \wid -> do
+            echo $ "Deleting work item #" <> wid
+            liftIO $ deleteWorkItem manager authToken issueId wid
+        echo $ "Importing work items for issue " <> issueId
+        liftIO $ importWorkItems manager authToken userName issueId durMap
 
 
 -- | CLI-options for deployer.
 data Options = Options
-    { --itIsProductionCluster :: Bool
-      orgFile  :: String
-    , userName :: String
-    --, numberOfNodes         :: Int
-    --, noBuild               :: Bool
+    { orgFile   :: String
+    , authToken :: String
+    , userName  :: String
     }
 
 optionsParser :: Parser Options
 optionsParser = Options <$>
-    -- ( flag' True  (long "prod")
-    --   <|> flag' False (long "dev") )
-    -- <*>
       strOption (
          long       "org"
       <> metavar    "FILE" )
     <*>
       strOption (
+         long       "token"
+      <> metavar    "AUTH_TOKEN" )
+    <*>
+      strOption (
          long       "user"
       <> metavar    "USERNAME" )
-    -- <*>
-    --   option auto (
-    --      long       "nodes"
-    --   <> metavar    "NUMBER"
-    --   <> help       "Number of nodes in a cluster, from 1 to 100." )
-    -- <*>
-    --   switch (
-    --      long       "no-build"
-    --   <> help       "Don't build cluster, assume it's built" )

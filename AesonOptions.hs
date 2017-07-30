@@ -44,6 +44,7 @@ defaultOptions =
     { A.fieldLabelModifier = headToLower . stripFieldPrefix . dropPunctuation
     , A.constructorTagModifier = headToLower . stripConstructorPrefix
     , A.sumEncoding = A.ObjectWithSingleField
+    , A.omitNothingFields = True
     }
 
 -- | These options are the same as `defaultOptions`, but they don't

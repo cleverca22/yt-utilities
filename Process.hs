@@ -6,24 +6,33 @@
 
 module Process where
 
-import           Control.Exception         (Exception, throw)
-import           Control.Monad             (foldM)
-import           Data.Aeson                (FromJSON (..), eitherDecode, genericParseJSON)
-import           Data.Bifunctor            (bimap, second)
-import qualified Data.HashMap.Strict       as HM
-import           Data.Maybe                (fromMaybe)
-import           Data.Monoid               ((<>))
-import           Data.Text                 (Text)
-import qualified Data.Text                 as T
-import           Data.Time                 (Day, utctDay)
-import           Data.Time.Clock.POSIX     (getPOSIXTime, posixSecondsToUTCTime)
-import           GHC.Generics              (Generic)
-import qualified Network.HTTP.Client       as H
-import qualified Network.HTTP.Types.Header as H
+import           Control.Exception     (Exception, throw)
+import           Control.Monad         (foldM, when)
+import           Data.Aeson            (FromJSON (..), ToJSON (..), eitherDecode, encode,
+                                        genericParseJSON, genericToJSON)
+import           Data.Bifunctor        (bimap, second)
+import qualified Data.ByteString.Lazy  as LBS
+import qualified Data.HashMap.Strict   as HM
+import           Data.Maybe            (fromMaybe)
+import           Data.Monoid           ((<>))
+import           Data.String           (fromString)
+import           Data.Text             (Text)
+import qualified Data.Text             as T
+import           Data.Time             (Day, UTCTime (..))
+import           Data.Time.Clock.POSIX (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
+import           GHC.Generics          (Generic)
+import qualified Network.HTTP.Client   as H
+import qualified Network.HTTP.Types    as H
 
-import           AesonOptions              (defaultOptions)
-import           Parsing                   (Duration, parseOrg)
-import           PreProcess                (DurationMap, IssueId, preProcess)
+import           AesonOptions          (defaultOptions)
+import           Parsing               (Duration, parseOrg)
+import           PreProcess            (DurationMap, IssueId, preProcess)
+
+instance ToJSON Author where
+    toJSON = genericToJSON defaultOptions
+
+instance ToJSON WorkItem where
+    toJSON = genericToJSON defaultOptions
 
 instance FromJSON Author where
     parseJSON = genericParseJSON defaultOptions
@@ -33,13 +42,14 @@ instance FromJSON WorkItem where
 
 data WorkItem =
   WorkItem
-    { wiId          :: String
+    { wiId          :: Maybe String
     , wiDate        :: Integer
     , wiDuration    :: Word
     , wiDescription :: Maybe Text
     , wiAuthor      :: Author
     }
   deriving (Show, Generic)
+
 data Author =
   Author
     { aLogin :: String }
@@ -48,11 +58,23 @@ data Author =
 ytTZShift :: Integer
 ytTZShift = 3 * 60 * 60 * 1000
 
+ytTimeToDay :: Integer -> Day
+ytTimeToDay t = utctDay $ posixSecondsToUTCTime $ fromIntegral $ (t + ytTZShift) `div` 1000
+
+dayToYtTime :: Day -> Integer
+dayToYtTime day = secs * 1000
+  where
+    utc = UTCTime day 0
+    secs = round $ utcTimeToPOSIXSeconds utc
+
 processWIs :: [WorkItem] -> HM.HashMap UserName DurationMap'
 processWIs = fmap (toMap . map toTriple) . foldr (\wi -> HM.alter (Just . (wi:) . fromMaybe []) $ aLogin (wiAuthor wi)) mempty
   where
-    toTriple wi = (toDay (wiDate wi), wiId wi, fromMaybe "" (wiDescription wi), wiDuration wi)
-    toDay t = utctDay $ posixSecondsToUTCTime $ fromIntegral $ (t + ytTZShift) `div` 1000
+    toTriple wi =
+        ( ytTimeToDay (wiDate wi)
+        , fromMaybe (error "no workitemId in response") $ wiId wi
+        , fromMaybe "" (wiDescription wi)
+        , wiDuration wi)
 
 toMap :: [(Day, WorkitemId, Text, Duration)] -> DurationMap'
 toMap = foldr insert mempty
@@ -64,33 +86,83 @@ toMap = foldr insert mempty
         insert2 (Just dur') = Just $ dur' + dur
         insert2 _           = Just dur
 
-headers :: [H.Header]
-headers = [ ("Authorization", "Bearer perm:Z2VvcmdlZWU=.VGVzdDE=.nPgExkZGKX4qNkr2RxdHHlmVNRxeKu")
+setHeaders :: String -> H.Request -> H.Request
+setHeaders authToken r = r { H.requestHeaders = [ ("Authorization", "Bearer " <> fromString authToken)
           , ("Accept", "application/json")
-          ]
+          , ("Content-Type", "application/json")
+          ] }
 
 type UserName = String
 type WorkitemId = String
 
 data ProcessError = ParseError String
+                  | DeleteWorkItemError String String
+                  | ImportWorkItemsError String
   deriving (Generic, Show)
 
 instance Exception ProcessError
 
 type DurationMap' = HM.HashMap Day ([WorkitemId], HM.HashMap Text Duration)
 
-getIssueWIs :: H.Manager -> IssueId -> IO (HM.HashMap UserName DurationMap')
-getIssueWIs manager (T.unpack -> issueId) = do
-    request <- H.parseRequest $ "https://issues.serokell.io/rest/issue/"<>issueId<>"/timetracking/workitem"
-    let request' = request
-          { H.requestHeaders = headers }
-    response <- H.httpLbs request' manager
+ytWorkItems :: String
+ytWorkItems = "/workitems"
+
+ytTimeTracking :: String
+ytTimeTracking = "/timetracking/workitem"
+
+ytRestImportEndpoint :: String
+ytRestImportEndpoint = "https://issues.serokell.io/rest/import/issue/"
+
+ytRestEndpoint :: String
+ytRestEndpoint = "https://issues.serokell.io/rest/issue/"
+
+getIssueWIs :: H.Manager -> String -> IssueId -> IO (HM.HashMap UserName DurationMap')
+getIssueWIs manager authToken (T.unpack -> issueId) = do
+    request <- setHeaders authToken <$> (H.parseRequest $ ytRestEndpoint<>issueId<>ytTimeTracking)
+    response <- H.httpLbs request manager
     case processWIs <$> eitherDecode (H.responseBody response) of
         Left err  -> throw $ ParseError err
         Right res -> return res
 
-filterProcess :: H.Manager -> UserName -> HM.HashMap IssueId DurationMap -> IO ([WorkitemId], HM.HashMap IssueId DurationMap)
-filterProcess manager user = foldM processDo mempty . HM.toList
+deleteWorkItem :: H.Manager -> String -> IssueId -> WorkitemId -> IO ()
+deleteWorkItem manager authToken (T.unpack -> issueId) wId = do
+    request <- setHeaders authToken <$> (H.parseRequest $ "DELETE " <> ytRestEndpoint
+                  <> issueId <> ytTimeTracking <> "/" <> wId)
+    response <- H.httpLbs request manager
+    when (H.responseStatus response /= H.status200) $ do
+        LBS.putStrLn (H.responseBody response)
+        throw $ DeleteWorkItemError issueId wId
+
+importWorkItems :: H.Manager -> String -> UserName -> IssueId -> DurationMap -> IO ()
+importWorkItems manager authToken user (T.unpack -> issueId) durMap = do
+    let encoded = encode $ flatDurMap user durMap
+    putStr $ "Items for issue " <> issueId <> ": "
+    LBS.putStrLn encoded
+    request <- setHeaders authToken <$>
+                (H.parseRequest $ "PUT " <> ytRestImportEndpoint
+                  <> issueId <> ytWorkItems)
+    let request' = request { H.requestBody = H.RequestBodyLBS encoded }
+    response <- H.httpLbs request' manager
+    when (H.responseStatus response /= H.status200) $ do
+        LBS.putStrLn (H.responseBody response)
+        throw $ ImportWorkItemsError issueId
+
+flatDurMap user durMap = map flatToWorkItem flattened
+  where
+    flatToWorkItem (day, desc, dur) =
+      WorkItem
+        { wiId = Nothing
+        , wiDate = dayToYtTime day
+        , wiDuration = dur
+        , wiDescription = if T.null desc then Nothing else Just desc
+        , wiAuthor = Author user
+        }
+    flattened :: [(Day, Text, Duration)]
+    flattened = concat $ map f $ HM.toList $ HM.toList <$> durMap
+    f (a, ns) = map (\(k, v) -> (a, k, v)) ns
+
+filterProcess :: H.Manager -> String -> UserName -> HM.HashMap IssueId DurationMap -> IO (HM.HashMap IssueId ([WorkitemId], DurationMap))
+filterProcess manager authToken user = foldM processDo mempty . HM.toList
   where
     processDo' :: DurationMap' -> Day -> HM.HashMap Text Duration -> ([WorkitemId], DurationMap) -> ([WorkitemId], DurationMap)
     processDo' ytDurMap day items (widsAcc, durMap) =
@@ -102,13 +174,11 @@ filterProcess manager user = foldM processDo mempty . HM.toList
             _ -> (widsAcc, durMapUpdated)
       where
         durMapUpdated = HM.insert day items durMap
-    processDo (wids, accum) (issueId, durMap) = do
-        ytDurMap <- (fromMaybe mempty . HM.lookup user) <$> getIssueWIs manager issueId
+    processDo accum (issueId, durMap) = do
+        ytDurMap <- (fromMaybe mempty . HM.lookup user) <$> getIssueWIs manager authToken issueId
         putStrLn $ "Fetched durations for issue " <> show issueId <> ": " <> show ytDurMap
         let (wids', durMap') = HM.foldrWithKey (processDo' ytDurMap) mempty durMap
-        return ( wids ++ wids'
-               , if HM.null durMap'
-                   then accum
-                   else HM.insert issueId durMap' accum
-               )
+        if HM.null durMap'
+           then return accum
+           else return $ HM.insert issueId (wids', durMap') accum
 
