@@ -5,6 +5,8 @@
 module PreProcess
   ( DurationMap
   , preProcess
+  , toMap
+  , IssueId
   ) where
 
 import           Data.Hashable       (Hashable (..))
@@ -14,15 +16,17 @@ import           Data.Time           (Day, DiffTime, diffTimeToPicoseconds, utct
                                       utctDayTime)
 import           Parsing             (Duration, IssueRecordMap, TimeRecord (..))
 
-type DurationMap = HM.HashMap Text (HM.HashMap Day (HM.HashMap Text Duration))
+type IssueId = Text
+
+type DurationMap = HM.HashMap Day (HM.HashMap Text Duration)
 
 instance Hashable Day where
     hashWithSalt s = hashWithSalt s . fromEnum
 
-preProcess :: IssueRecordMap -> DurationMap
+preProcess :: IssueRecordMap -> HM.HashMap IssueId DurationMap
 preProcess = fmap processIssueId
 
-processIssueId :: [TimeRecord] -> HM.HashMap Day (HM.HashMap Text Duration)
+processIssueId :: [TimeRecord] -> DurationMap
 processIssueId = toMap . concatMap processRecord
 
 processRecord :: TimeRecord -> [(Day, Text, Duration)]
@@ -31,9 +35,9 @@ processRecord (ClockRecord desc start end)
     | startD == endD =
           [ (startD, desc, endM - startM) ]
     | otherwise =
-          [ (startD, desc, minutesInDay - startM)
-          , (endD, desc, endM)
-          ] ++ map (,desc,minutesInDay) [succ startD .. pred endD]
+          [ (startD, desc, minutesInDay - startM) ]
+          ++ (if endM == 0 then [] else [(endD, desc, endM)])
+          ++ map (,desc,minutesInDay) [succ startD .. pred endD]
   where
     startM = toMinutes (utctDayTime start)
     endM = toMinutes (utctDayTime end)
@@ -43,7 +47,7 @@ processRecord (ClockRecord desc start end)
 minutesInDay :: Duration
 minutesInDay = 60*24
 
-toMap :: [(Day, Text, Duration)] -> HM.HashMap Day (HM.HashMap Text Duration)
+toMap :: [(Day, Text, Duration)] -> DurationMap
 toMap = foldr insert mempty
   where
     insert (day, desc, dur) = HM.alter insert1 day
