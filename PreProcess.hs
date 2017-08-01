@@ -3,11 +3,11 @@
 {-# LANGUAGE TupleSections     #-}
 
 module PreProcess
-  ( DurationMap
-  , preProcess
-  , toMap
-  , IssueId
-  ) where
+       ( DurationMap
+       , preProcess
+       , toMap
+       , IssueId
+       ) where
 
 import           Data.Hashable       (Hashable (..))
 import qualified Data.HashMap.Strict as HM

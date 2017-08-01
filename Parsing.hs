@@ -3,12 +3,12 @@
 {-# LANGUAGE ViewPatterns      #-}
 
 module Parsing
-  ( parseOrg
-  , IssueRecordMap
-  , TimeRecord (..)
-  , Duration
-  , ytParsingCtxTag
-  ) where
+       ( parseOrg
+       , IssueRecordMap
+       , TimeRecord (..)
+       , Duration
+       , ytParsingCtxTag
+       ) where
 
 import           Control.Monad       (foldM)
 import           Data.Bifunctor      (bimap, second)
@@ -34,16 +34,15 @@ ytParsingCtxTag = "{yt_timetracking}"
 
 type IssueRecordMap = HM.HashMap Text [TimeRecord]
 
-data ParsingCtx =
-     ParsingCtx
-      { pcYTSection   :: Maybe Int
-      , pcIssueId     :: Maybe (Int, Text)
-      , pcDescription :: Maybe (Int, Text)
-      , pcResult      :: IssueRecordMap
-      , issueRegex    :: R.Regex
-      , clockRegex    :: R.Regex
-      , trackRegex    :: R.Regex
-      }
+data ParsingCtx = ParsingCtx
+    { pcYTSection   :: Maybe Int
+    , pcIssueId     :: Maybe (Int, Text)
+    , pcDescription :: Maybe (Int, Text)
+    , pcResult      :: IssueRecordMap
+    , issueRegex    :: R.Regex
+    , clockRegex    :: R.Regex
+    , trackRegex    :: R.Regex
+    }
 
 timeFormats :: [String]
 timeFormats =
@@ -225,4 +224,3 @@ parseTimeRecord clockReg trackReg mDesc line =
     trackF (Just (parseDayH -> from, parseDurationH -> to)) =
         TrackRecord desc <$> from <*> to
     trackF _ = Nothing
-
