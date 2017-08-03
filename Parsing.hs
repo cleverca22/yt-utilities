@@ -8,6 +8,7 @@ module Parsing
        , TimeRecord (..)
        , Duration
        , ytParsingCtxTag
+       , formatDuration
        ) where
 
 import           Control.Monad       (foldM)
@@ -79,6 +80,23 @@ convertDurPair = bimap read' read' .
   where
     read' = readMaybe . T.unpack
 
+-- | Converts duration into 5w4d2h3m format.
+formatDuration :: Duration -> String
+formatDuration minutesN =
+    mconcat [ mP weeksN "w"
+            , mP daysN "d"
+            , mP hoursN "h"
+            , mP minutesN4 "m"
+            ]
+  where
+    mP x p = if x == 0 then "" else show x <> p
+
+    weeksN = minutesN `div` (5 * 8 * 60)
+    minutesN2 = minutesN `mod` (5 * 8 * 60)
+    daysN = minutesN2 `div` (8 * 60)
+    minutesN3 = minutesN2 `mod` (8 * 60)
+    hoursN = minutesN3 `div` 60
+    minutesN4 = minutesN3 `mod` 60
 
 parseDayH :: Text -> Maybe Day
 parseDayH (T.unpack -> time) = safeHead $ catMaybes $

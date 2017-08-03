@@ -25,7 +25,7 @@ import           System.FilePath.Posix      ((</>))
 import           Parsing                    (Duration, parseOrg)
 import           PreProcess                 (DurationMap, IssueId, preProcess)
 import           Process                    (deleteWorkItem, filterProcess,
-                                             importWorkItems)
+                                             formatCsvFilterProcess, importWorkItems)
 
 main :: IO ()
 main = do
@@ -53,10 +53,14 @@ deploymentScript Options{..} = do
             echo $ "Importing work items for issue " <> issueId
             importWorkItems manager authToken userName issueId durMap
 
-    let onDryRun (issueId, _) = do
-            echo $ "DRYRUN: Processing issue id: " <> issueId
+    let onDryRun = liftIO $ do
+            putStrLn "DRY RUN OUTPUT FOLLOWS"
+            putStrLn ""
+            T.putStr $ formatCsvFilterProcess m'
 
-    flip mapM_ (HM.toList m') $ if dryRun then onDryRun else onRealRun
+    if not dryRun
+        then flip mapM_ (HM.toList m') onRealRun
+        else onDryRun
 
 -- | CLI-options for deployer.
 data Options = Options
