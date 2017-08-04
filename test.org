@@ -13,10 +13,10 @@ CLOCK: [2016-09-13 Tue 11:09]--[2016-09-13 Tue 11:26] =>  0:17
 **** Item group #1
 ***** IN PROGRESS CSL-1333 Test stake locking
 CLOCK: [2016-09-13 Tue 23:09]--[2016-09-14 Wed 23:00] => 23:51
-****** Describe
-******* Small subitem
+****** TODO Describe
+******* TODO Small subitem
   CLOCK: [2017-07-09 10:10]--[2017-07-09 Fri 10:40] =>  0:30
-****** Assist Alex S.
+****** DONE Assist Alex S.
        TRACK: 2017-07-28 0:15
 ***** CSL-1231 I was lazy to provide issue title
   TRACK: 2016-11-03 0:13

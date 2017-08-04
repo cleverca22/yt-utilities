@@ -180,10 +180,15 @@ processHeader depth (invalidateCtxOnDepth depth -> ctx) line = do
       -- We're inside the subtree that is identified as 'some youtrack
       -- task to export'.
       Just _ -> case pcDescription ctx of
+          -- Every header under main issueid header under description
+          -- header is treated as the last description header.
           Just _ -> return ctx
           _ ->
-            let desc = T.dropWhile (\c -> isSpace c || c == '*') line
-             in return ctx { pcDescription = Just (depth, desc) }
+            -- drop stars, spaces and one keyword.
+            let descr = dropPrefix (map T.pack keywords) $
+                        T.dropWhile ((==) '*')
+                        line
+            in return ctx { pcDescription = Just (depth, descr) }
       -- We're about to check whether this subtree is related to yt
       -- clocking or it's a intermediate node.
       Nothing -> do
@@ -192,6 +197,15 @@ processHeader depth (invalidateCtxOnDepth depth -> ctx) line = do
             Just issueId ->
                 return ctx { pcIssueId = Just (depth, issueId) }
             _ -> return ctx
+  where
+    dropSpaces = T.dropWhile isSpace
+    -- Drop prefix of @l@ which matches first needle in
+    -- @needles@. Also drop spaces of @l@.
+    dropPrefix :: [Text] -> Text -> Text
+    dropPrefix needles l0@(dropSpaces -> l) =
+        case filter (`T.isPrefixOf` l) needles of
+          (needle:_) -> dropSpaces $ T.drop (T.length needle) l
+          _          -> l0
 
 invalidateCtxOnDepth :: Int -> ParsingCtx -> ParsingCtx
 invalidateCtxOnDepth depth = invalidateIssueId . invalidateDescription
@@ -246,9 +260,9 @@ parseOrgLine ctx@ParsingCtx{..} line = case (pcYTSection, headerDepthM) of
            then processHeader headerDepth (ctx' { pcYTSection = Just headerDepth }) line
            else return ctx'
     headerDepthM :: Maybe Int
-    headerDepthM = if "*" `T.isPrefixOf` line
-                     then Just $ T.length $ T.takeWhile (== '*') line
-                     else Nothing
+    headerDepthM
+        |"*" `T.isPrefixOf` line = Just $ T.length $ T.takeWhile (== '*') line
+        | otherwise = Nothing
 
 getFstMatch :: R.Regex -> Text -> IO (Maybe Text)
 getFstMatch reg line = f <$> getGroupsFromFirstMatch reg line
@@ -265,7 +279,8 @@ getPairMatch reg line = f <$> getGroupsFromFirstMatch reg line
 get_3 :: (a, b, c) -> c
 get_3 (_, _, c) = c
 
-parseTimeRecord :: R.Regex -> R.Regex -> Maybe Text -> Text -> IO (Maybe TimeRecord)
+parseTimeRecord ::
+       R.Regex -> R.Regex -> Maybe Text -> Text -> IO (Maybe TimeRecord)
 parseTimeRecord clockReg trackReg mDesc line =
     safeHead . catMaybes <$>
       sequence [ clockF <$> getPairMatch clockReg line
