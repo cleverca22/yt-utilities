@@ -1,5 +1,5 @@
 #!/usr/bin/env stack
--- stack --nix-packages "icu zlib" runghc --package optparse-simple --package shell-conduit --package transformers --package time --package extra --package text-icu --package unordered-containers --package hashable --package aeson --package http-client --package http-client-tls
+-- stack runghc --package optparse-simple --package shell-conduit --package transformers --package time --package extra --package text-icu --package unordered-containers --package hashable --package aeson --package http-client --package http-client-tls
 
 {-# LANGUAGE AllowAmbiguousTypes #-}
 {-# LANGUAGE DeriveGeneric       #-}
@@ -21,6 +21,7 @@ import           Options.Applicative.Simple (Parser, auto, empty, flag', help, l
                                              value, (<|>))
 import           System.Exit                (die)
 import           System.FilePath.Posix      ((</>))
+import           System.IO                  (hSetEncoding, stderr, stdin, stdout, utf8)
 
 import           Parsing                    (Duration, parseOrg)
 import           PreProcess                 (DurationMap, IssueId, preProcess)
@@ -29,6 +30,7 @@ import           Process                    (deleteWorkItem, filterProcess,
 
 main :: IO ()
 main = do
+    mapM_ (`hSetEncoding` utf8) [stdin, stdout, stderr]
     (options, ()) <-
         simpleOptions
         "0.1"
