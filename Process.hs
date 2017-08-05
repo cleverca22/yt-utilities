@@ -8,7 +8,6 @@ module Process
        ( deleteWorkItem
        , filterProcess
        , importWorkItems
-       , formatCsvFilterProcess
        ) where
 
 import           Control.Exception          (Exception, throw)
@@ -32,7 +31,7 @@ import qualified Network.HTTP.Client        as H
 import qualified Network.HTTP.Types         as H
 
 import           AesonOptions               (defaultOptions)
-import           Parsing                    (Duration, formatDuration, parseOrg)
+import           Parsing                    (Duration, parseOrg)
 import           PreProcess                 (DurationMap, IssueId, preProcess)
 
 instance ToJSON Author where
@@ -210,27 +209,3 @@ filterProcess manager authToken user =
         if HM.null durMap'
             then return accum
             else return $ HM.insert issueId (wids', durMap') accum
-
--- | Formats result of 'filterProcess' as csv to be displayed in dry
--- run mode.
-formatCsvFilterProcess :: HM.HashMap IssueId ([WorkitemId], DurationMap) -> Text
-formatCsvFilterProcess hm =
-    T.intercalate "\n" $ concatMap dumpIssue $ HM.toList hm
-  where
-    dumpIssue :: (IssueId, ([WorkitemId], DurationMap)) -> [Text]
-    dumpIssue (issueId, (items, durMap)) =
-        map
-        (\durMapI -> T.intercalate "\t" $
-            [ issueId
-            , T.intercalate " " (map T.pack items)
-            , durMapI
-            ])
-        (dumpDurMap durMap)
-    dumpDurMap :: DurationMap -> [Text]
-    dumpDurMap =
-        concatMap (\(d, tdmap) -> map (\x -> T.pack (show d) <> "\t" <> x) (dumpTdMap tdmap)) .
-        HM.toList
-    dumpTdMap :: HM.HashMap Text Duration -> [Text]
-    dumpTdMap =
-        map (\(t,dur) -> T.pack (formatDuration dur) <> "\t" <> t) .
-        HM.toList

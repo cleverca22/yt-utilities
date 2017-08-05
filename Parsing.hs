@@ -1,3 +1,4 @@
+{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecordWildCards   #-}
 {-# LANGUAGE ViewPatterns      #-}
@@ -11,13 +12,13 @@ module Parsing
        , formatDuration
        ) where
 
-import           Control.Monad       (foldM)
+import           Control.Monad       (foldM, guard)
 import           Data.Bifunctor      (bimap, second)
 import           Data.Char           (isSpace)
 import qualified Data.HashMap.Strict as HM
 import           Data.List.Extra     (replace)
 import           Data.Maybe          (catMaybes, fromMaybe)
-import           Data.Monoid         ((<>))
+import           Data.Monoid         (First (..), (<>))
 import           Data.Text           (Text)
 import qualified Data.Text           as T
 import qualified Data.Text.ICU.Regex as R
@@ -28,7 +29,7 @@ type Duration = Word
 
 -- | Youtrack project ids.
 projectNames :: [String]
-projectNames = ["CSL","SRK","TW","CSLD","CSM"]
+projectNames = ["CSL","SRK","TW","CSLD","CSM","CSE","SU","LW"]
 
 -- | Keywords that are commonly used in org-mode.
 keywords :: [String]
@@ -40,9 +41,10 @@ data TimeRecord = ClockRecord Text UTCTime UTCTime
   deriving Show
 
 -- | Presense of this substring in the header name includes it into
--- working scope of the parser. Everything else is skipped.
+-- working scope of the parser. Everything else is skipped. You can
+-- put it into org tag.
 ytParsingCtxTag :: Text
-ytParsingCtxTag = "{yt_timetracking}"
+ytParsingCtxTag = "ytexport"
 
 type IssueRecordMap = HM.HashMap Text [TimeRecord]
 
@@ -51,8 +53,8 @@ data ParsingCtx = ParsingCtx
       pcYTSection   :: Maybe Int
       -- ^ If we encountered 'ytParsingCtxTag'ged header we set this
       -- value to @Just d@ where @d@ is the depth of header.
-    , pcIssueId     :: Maybe (Int, Text)
-      -- ^ Depth and title of first seen header that has projectName id inside.
+    , pcIssueId     :: Maybe (Int, Text, Text)
+      -- ^ Depth, title and description of first seen header that has projectName id inside.
     , pcDescription :: Maybe (Int, Text)
       -- ^ Depth/title of last header seen after we've set 'pcIssueId'
       -- to @Just@. Basically any subheader after top projectName
@@ -130,10 +132,14 @@ safeHead :: [a] -> Maybe a
 safeHead []    = Nothing
 safeHead (a:_) = Just a
 
+-- Something like
+-- "***** TODO [#A] SRK-X Description with som/e 5 words :maybe?              :tag1:tag2:"
 issueRegexpText :: Text
-issueRegexpText = "(?:\\W|^)((?:"<>projects<>")-\\d+)(?:\\W|$)"
+issueRegexpText =
+    "^(?:\\**)\\s*(?:"<>todokws<>")?\\s*(?:\\[#\\w\\])?\\s*((?:"<>projects<>")-\\d+)?\\s*((?:.)*?)\\s*(?:(?::\\w+)+:)?$"
   where
     projects = T.intercalate "|" (map T.pack projectNames)
+    todokws = T.intercalate "|" (map T.pack keywords)
 
 getGroupsFromFirstMatch :: R.Regex -> Text -> IO [(Int, Int, Text)]
 getGroupsFromFirstMatch reg text = do
@@ -176,50 +182,38 @@ insertToMap issueId record m =
 processHeader :: Int -> ParsingCtx -> Text -> IO ParsingCtx
 processHeader depth (invalidateCtxOnDepth depth -> ctx) line = do
     putStrLn $ "Parsing header of depth " <> show depth <> ": " <> show line
-    case pcIssueId ctx of
+    curLineM <- getPairMatch (issueRegex ctx) line
+    case (pcIssueId ctx, curLineM) of
       -- We're inside the subtree that is identified as 'some youtrack
       -- task to export'.
-      Just _ -> case pcDescription ctx of
-          -- Every header under main issueid header under description
-          -- header is treated as the last description header.
-          Just _ -> return ctx
-          _ ->
-            -- drop stars, spaces and one keyword.
-            let descr = dropPrefix (map T.pack keywords) $
-                        T.dropWhile ((==) '*')
-                        line
-            in return ctx { pcDescription = Just (depth, descr) }
+      (Just _,Just (_, descr)) -> do
+          putStrLn $ "matched descr: " <> T.unpack descr
+          pure $ ctx { pcDescription = Just (depth, descr) }
       -- We're about to check whether this subtree is related to yt
       -- clocking or it's a intermediate node.
-      Nothing -> do
-          mIssueId <- getFstMatch (issueRegex ctx) line
-          case mIssueId of
-            Just issueId ->
-                return ctx { pcIssueId = Just (depth, issueId) }
-            _ -> return ctx
-  where
-    dropSpaces = T.dropWhile isSpace
-    -- Drop prefix of @l@ which matches first needle in
-    -- @needles@. Also drop spaces of @l@.
-    dropPrefix :: [Text] -> Text -> Text
-    dropPrefix needles l0@(dropSpaces -> l) =
-        case filter (`T.isPrefixOf` l) needles of
-          (needle:_) -> dropSpaces $ T.drop (T.length needle) l
-          _          -> l0
+      (Nothing, Just (issueId,issueTopDesc))
+          | not (T.null issueId) -> do
+              putStrLn $ "matched " <> show (depth, issueId, issueTopDesc)
+              pure ctx { pcIssueId = Just (depth, issueId, issueTopDesc) }
+          | otherwise -> putStrLn "issueId is empty" >> pure ctx
+      _ -> pure ctx
 
 invalidateCtxOnDepth :: Int -> ParsingCtx -> ParsingCtx
 invalidateCtxOnDepth depth = invalidateIssueId . invalidateDescription
   where
-    invalidateIssueId ctx' = ctx' { pcIssueId = invModify (pcIssueId ctx') }
-    invalidateDescription ctx' = ctx' { pcDescription = invModify (pcDescription ctx') }
-    invModify x@(Just (d, _))
-      | d >= depth = Nothing
-      | otherwise = x
-    invModify x = x
+    invalidateIssueId ctx' = ctx' { pcIssueId = invModify3 (pcIssueId ctx') }
+    invalidateDescription ctx' = ctx' { pcDescription = invModify2 (pcDescription ctx') }
+    -- yeah lenses
+    invModify3 (Just x@(d, _, _)) = x <$ guard (d < depth)
+    invModify3 _                  = Nothing
+    invModify2 (Just x@(d, _)) = x <$ guard (d < depth)
+    invModify2 _               = Nothing
 
 -- | Parse single orgmode line.
 parseOrgLine :: ParsingCtx -> Text -> IO ParsingCtx
-parseOrgLine ctx@ParsingCtx{..} line = case (pcYTSection, headerDepthM) of
+parseOrgLine ctx@ParsingCtx{..} line = do
+  --putStrLn $ "Processing " <> T.unpack line
+  case (pcYTSection, headerDepthM) of
     -- We're not yet in the YT scope, viewing at a header.
     (Nothing, Just headerDepth) -> processHeaderInNonYT headerDepth ctx
     -- We're in yt scope and processing the header.
@@ -237,7 +231,11 @@ parseOrgLine ctx@ParsingCtx{..} line = case (pcYTSection, headerDepthM) of
     -- We're in YT mode but process something other then header --
     -- most importantly time-track lines.
     (Just ytDepth, Nothing) -> do
-        mRec <- parseTimeRecord clockRegex trackRegex (snd <$> pcDescription) line
+        let recordName =
+                getFirst $ mconcat $ map First $
+                [snd <$> pcDescription,(\(_,_,r) -> r) <$> pcIssueId]
+
+        mRec <- parseTimeRecord clockRegex trackRegex recordName line
         case (pcIssueId,mRec) of
             -- Found a CLOCK/TRACK inside YT scope inside subtree
             -- which doesn't have YT id in the name.
@@ -247,7 +245,7 @@ parseOrgLine ctx@ParsingCtx{..} line = case (pcYTSection, headerDepthM) of
                 show s
             -- We've found a decent track inside YT context inside
             -- header with YT id so we add it to result.
-            (Just (depth, issueId), Just record) ->
+            (Just (depth, issueId, _), Just record) ->
                  pure ctx { pcResult = insertToMap issueId record pcResult }
             -- Everything else, we do not care.
             _ -> pure ctx
