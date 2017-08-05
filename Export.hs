@@ -11,14 +11,17 @@ import           Control.Monad.IO.Class     (liftIO)
 import qualified Data.ByteString.Lazy       as L
 import           Data.Conduit.Shell
 import qualified Data.HashMap.Strict        as HM
+import           Data.Maybe                 (fromMaybe)
 import           Data.Monoid                ((<>))
 import           Data.Text                  (Text)
 import qualified Data.Text.IO               as T
+import           Data.Time                  (Day, UTCTime (utctDay), defaultTimeLocale,
+                                             fromGregorian, parseTimeM)
 import qualified Network.HTTP.Client.TLS    as H
-import           Options.Applicative.Simple (Parser, auto, empty, flag', help, long,
-                                             metavar, option, optional, showDefault,
-                                             simpleOptions, strOption, switch, switch,
-                                             value, (<|>))
+import           Options.Applicative.Simple (Parser, auto, eitherReader, empty, flag',
+                                             help, long, metavar, option, optional,
+                                             showDefault, simpleOptions, strOption,
+                                             switch, switch, value, (<|>))
 import           System.Exit                (die)
 import           System.FilePath.Posix      ((</>))
 import           System.IO                  (hSetEncoding, stderr, stdin, stdout, utf8)
@@ -42,7 +45,8 @@ main = do
 
 deploymentScript :: Options -> Segment ()
 deploymentScript Options{..} = do
-    m <- preProcess <$> (liftIO $ parseOrg =<< T.readFile orgFile)
+    let since = fromMaybe (fromGregorian 1990 1 1) sinceDay
+    m <- preProcess since <$> (liftIO $ parseOrg =<< T.readFile orgFile)
     manager <- liftIO $ H.newTlsManager
     m' <- liftIO $ filterProcess manager authToken userName m
     echo $ "For import to YT: " <> show m'
@@ -69,6 +73,7 @@ data Options = Options
     { orgFile   :: String
     , authToken :: String
     , userName  :: String
+    , sinceDay  :: Maybe Day
     , dryRun    :: Bool
     }
 
@@ -78,4 +83,10 @@ optionsParser =
     strOption (long "org" <> metavar "FILE") <*>
     strOption (long "token" <> metavar "AUTH_TOKEN") <*>
     strOption (long "user" <> metavar "USERNAME") <*>
-    switch (long "dry-run" <> help "Do not export, print into file instead")
+    optional
+        (option (eitherReader parseDate)
+            (long "since" <> metavar "YYYY-MM-DD" <>
+             help "The first day timestamps will be considered valid on")) <*>
+    switch (long "dry-run" <> help "Do not export to YT, print info to stdout instead")
+  where
+    parseDate x = utctDay <$> parseTimeM True defaultTimeLocale "%F" x

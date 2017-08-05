@@ -9,6 +9,7 @@ module PreProcess
        , IssueId
        ) where
 
+
 import           Data.Hashable       (Hashable (..))
 import qualified Data.HashMap.Strict as HM
 import           Data.Text           (Text)
@@ -23,21 +24,19 @@ type DurationMap = HM.HashMap Day (HM.HashMap Text Duration)
 instance Hashable Day where
     hashWithSalt s = hashWithSalt s . fromEnum
 
-preProcess :: IssueRecordMap -> HM.HashMap IssueId DurationMap
-preProcess = fmap processIssueId
+preProcess :: Day -> IssueRecordMap -> HM.HashMap IssueId DurationMap
+preProcess since = fmap (toMap . concatMap (processRecord since))
 
-processIssueId :: [TimeRecord] -> DurationMap
-processIssueId = toMap . concatMap processRecord
-
-processRecord :: TimeRecord -> [(Day, Text, Duration)]
-processRecord (TrackRecord desc day dur) = [(day, desc, dur)]
-processRecord (ClockRecord desc start end)
-    | startD == endD =
-          [ (startD, desc, endM - startM) ]
-    | otherwise =
-          [ (startD, desc, minutesInDay - startM) ]
-          ++ (if endM == 0 then [] else [(endD, desc, endM)])
-          ++ map (,desc,minutesInDay) [succ startD .. pred endD]
+processRecord :: Day -> TimeRecord -> [(Day, Text, Duration)]
+processRecord since (TrackRecord desc day dur) =
+    if day >= since then [(day, desc, dur)] else []
+processRecord since (ClockRecord desc start end)
+    = filter (\(d,_,_) -> d >= since) $
+      if startD == endD
+        then [ (startD, desc, endM - startM) ]
+        else [ (startD, desc, minutesInDay - startM) ]
+             ++ (if endM == 0 then [] else [(endD, desc, endM)])
+             ++ map (,desc,minutesInDay) [succ startD .. pred endD]
   where
     startM = toMinutes (utctDayTime start)
     endM = toMinutes (utctDayTime end)
