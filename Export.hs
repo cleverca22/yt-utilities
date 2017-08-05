@@ -8,12 +8,13 @@
 {-# LANGUAGE TypeApplications    #-}
 
 import           Control.Monad.IO.Class     (liftIO)
-import qualified Data.ByteString.Lazy       as L
+import qualified Data.ByteString            as BS
 import           Data.Conduit.Shell
 import qualified Data.HashMap.Strict        as HM
 import           Data.Maybe                 (fromMaybe)
 import           Data.Monoid                ((<>))
 import           Data.Text                  (Text)
+import           Data.Text.Encoding         (decodeUtf8)
 import qualified Data.Text.IO               as T
 import           Data.Time                  (Day, UTCTime (utctDay), defaultTimeLocale,
                                              fromGregorian, parseTimeM)
@@ -46,7 +47,7 @@ main = do
 deploymentScript :: Options -> Segment ()
 deploymentScript Options{..} = do
     let since = fromMaybe (fromGregorian 1990 1 1) sinceDay
-    m <- preProcess since <$> (liftIO $ parseOrg =<< T.readFile orgFile)
+    m <- preProcess since <$> (liftIO $ parseOrg =<< decodeUtf8 <$> BS.readFile orgFile)
     manager <- liftIO $ H.newTlsManager
     m' <- liftIO $ filterProcess manager authToken userName m
     echo $ "For import to YT: " <> show m'
