@@ -51,8 +51,6 @@ deploymentScript Options{..} = do
     let since = fromMaybe (fromGregorian 1990 1 1) sinceDay
     m <- preProcess since <$> (liftIO $ parseOrg =<< decodeUtf8 <$> BS.readFile orgFile)
     manager <- liftIO $ H.newTlsManager
-    m' <- liftIO $ filterProcess manager authToken userName m
-    echo $ "For import to YT: " <> show m'
 
     let onRealRun (issueId, (wids, durMap)) = do
             echo $ "Processing issue " <> issueId
@@ -65,16 +63,17 @@ deploymentScript Options{..} = do
     let onDryRun = liftIO $ do
             putStrLn "DRY RUN OUTPUT FOLLOWS"
             putStrLn ""
-            T.putStrLn $ formatDryRunFilterProcess m'
+            T.putStrLn $ formatDryRunProcess m
 
-    if not dryRun
-        then flip mapM_ (HM.toList m') onRealRun
-        else onDryRun
+    if dryRun then onDryRun else do
+        m' <- liftIO $ filterProcess manager authToken userName m
+        echo $ "For import to YT: " <> show m'
+        flip mapM_ (HM.toList m') onRealRun
 
 -- | Formats result of 'filterProcess' as csv to be displayed in dry
 -- run mode.
-formatDryRunFilterProcess :: HM.HashMap IssueId ([String], DurationMap) -> Text
-formatDryRunFilterProcess hm =
+formatDryRunProcess :: HM.HashMap IssueId DurationMap -> Text
+formatDryRunProcess hm =
     T.intercalate "\n" $
     [ prettyTable
     , T.pack (replicate longestTableLine '-')
@@ -93,11 +92,11 @@ formatDryRunFilterProcess hm =
          ]
 
     totalDuration :: Duration
-    totalDuration = sum $ map (\(_,dm) -> sum $ map (sum . HM.elems) $ HM.elems dm) $ HM.elems hm
+    totalDuration = sum $ map (sum . map (sum . HM.elems) . HM.elems) $ HM.elems hm
     allThings :: [(String,String,String,String)]
     allThings = concatMap dumpIssue $ HM.toList hm
-    dumpIssue :: (IssueId, ([String], DurationMap)) -> [(String,String,String,String)]
-    dumpIssue (issueId, (items, durMap)) =
+    dumpIssue :: (IssueId, DurationMap) -> [(String,String,String,String)]
+    dumpIssue (issueId, durMap) =
         map
         (\(a,b,c) -> (T.unpack issueId,a,b,c))
         (dumpDurMap durMap)
