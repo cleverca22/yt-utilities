@@ -29,7 +29,10 @@ type Duration = Word
 
 -- | Youtrack project ids.
 projectNames :: [String]
-projectNames = ["CSL","SRK","TW","CSLD","CSM","CSE","SU","LW"]
+projectNames = [ "CSL", "CSLA", "CSLD", "CSE", "CSM"
+               --, "CSLTA" , "BOS", "CSLREQ", "DTP", "HSK", "IH", "RSC", "POS", "PV" -- projects exist, but are not actual and/or have timetracking disabled
+               , "CSLTC", "DAEF", "DEVOPS", "IMRF", "LW", "MT", "SRK", "SU", "TW", "VD"
+               ]
 
 -- | Keywords that are commonly used in org-mode.
 keywords :: [String]
