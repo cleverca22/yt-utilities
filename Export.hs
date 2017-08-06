@@ -24,6 +24,7 @@ import           Data.Time                  (Day, UTCTime (utctDay), defaultTime
 import           Lens.Micro                 (to, _1, _2, _3, _4)
 import           Lens.Micro.Extras          (view)
 import qualified Network.HTTP.Client.TLS    as H
+import           Numeric                    (showFFloat)
 import           Options.Applicative.Simple (Parser, auto, eitherReader, empty, flag',
                                              help, long, metavar, option, optional,
                                              showDefault, simpleOptions, strOption,
@@ -111,8 +112,9 @@ formatExportMap ytExport issueInfos hm =
       else
         [ prettyTable
         , T.pack (replicate longestTableLine '-')
-        , "Total time: " <> T.pack (formatDuration totalDuration) <>
-          ", hours: " <> T.pack (show $ fromIntegral totalDuration / 60) <> "h"
+        , "Total time: \n"
+        , T.pack (formatDuration totalDuration) <> "\n"
+        , T.pack (showFFloat (Just 2) (fromIntegral totalDuration / 60) "") <> "h"
         ]
   where
     longestTableLine = if T.null prettyTable then 0 else maximum (map T.length $ T.lines prettyTable)
