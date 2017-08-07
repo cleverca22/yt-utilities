@@ -8,6 +8,9 @@ module Process
        ( deleteWorkItem
        , filterProcess
        , importWorkItems
+       , sendMessageToSlack
+       , IssueInfo (..)
+       , getIssues
        ) where
 
 import           Control.Exception          (Exception, throw)
@@ -15,7 +18,10 @@ import           Control.Monad              (foldM, when)
 import           Control.Monad.IO.Class     (MonadIO, liftIO)
 import           Data.Aeson                 (FromJSON (..), ToJSON (..), eitherDecode,
                                              encode, genericParseJSON, genericToJSON)
+import qualified Data.Aeson                 as J
 import           Data.Bifunctor             (bimap, second)
+import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Char8      as BS8
 import qualified Data.ByteString.Lazy       as LBS
 import qualified Data.ByteString.Lazy.Char8 as LBS8
 import qualified Data.HashMap.Strict        as HM
@@ -24,6 +30,7 @@ import           Data.Monoid                ((<>))
 import           Data.String                (fromString)
 import           Data.Text                  (Text)
 import qualified Data.Text                  as T
+import qualified Data.Text.Encoding         as T
 import           Data.Time                  (Day, UTCTime (..))
 import           Data.Time.Clock.POSIX      (posixSecondsToUTCTime, utcTimeToPOSIXSeconds)
 import           GHC.Generics               (Generic)
@@ -33,6 +40,7 @@ import qualified Network.HTTP.Types         as H
 import           AesonOptions               (defaultOptions)
 import           Parsing                    (Duration, parseOrg)
 import           PreProcess                 (DurationMap, IssueId, preProcess)
+import           Util                       (safeHead)
 
 instance ToJSON Author where
     toJSON = genericToJSON defaultOptions
@@ -101,6 +109,7 @@ type WorkitemId = String
 data ProcessError = ParseError String
                   | DeleteWorkItemError String String
                   | ImportWorkItemsError String
+                  | SlackSendMsgError String
   deriving (Generic, Show)
 
 instance Exception ProcessError
@@ -136,6 +145,25 @@ deleteWorkItem manager authToken (T.unpack -> issueId) wId = liftIO $ do
     when (H.responseStatus response /= H.status200) $ do
         LBS8.putStrLn (H.responseBody response)
         throw $ DeleteWorkItemError issueId wId
+
+sendMessageToSlack :: MonadIO m => H.Manager -> String -> String -> Text -> m ()
+sendMessageToSlack manager apiToken channel msg = liftIO $ do
+    request <- H.parseRequest $ "POST https://slack.com/api/chat.postMessage"
+    let msgData =
+            [ ("token", BS8.pack apiToken)
+            , ("channel", BS8.pack channel)
+            , ("text", T.encodeUtf8 msg)
+            , ("as_user", "true")
+            ]
+        request' = (H.urlEncodedBody msgData request)
+                      { H.requestHeaders =
+                          [ ("Content-Type", "application/x-www-form-urlencoded") ]
+                      }
+    response <- H.httpLbs request' manager
+    let body = H.responseBody response
+    when (BS.null $ snd $ BS.breakSubstring "\"ok\":true" $ LBS.toStrict body) $ do
+        LBS8.putStrLn body
+        throw $ SlackSendMsgError channel
 
 importWorkItems ::
        (MonadIO m)
@@ -209,3 +237,52 @@ filterProcess manager authToken user =
         if HM.null durMap'
             then return accum
             else return $ HM.insert issueId (wids', durMap') accum
+
+data YtIssueInfo = YtIssueInfo
+    { iiField :: [IIField]
+    }
+    deriving (Show, Generic)
+
+data IIField = IIField
+    { iifName  :: Text
+    , iifValue :: J.Value
+    }
+    deriving (Show, Generic)
+
+instance ToJSON YtIssueInfo where
+    toJSON = genericToJSON defaultOptions
+instance FromJSON YtIssueInfo where
+    parseJSON = genericParseJSON defaultOptions
+
+instance ToJSON IIField where
+    toJSON = genericToJSON defaultOptions
+instance FromJSON IIField where
+    parseJSON = genericParseJSON defaultOptions
+
+data IssueInfo = IssueInfo
+      { iiIssueId :: IssueId
+      , iiTitle   :: Text
+      }
+    deriving (Show, Generic)
+
+processIssue :: YtIssueInfo -> IssueInfo
+processIssue YtIssueInfo {..} = IssueInfo issueId' title
+  where
+    getField k = fromMaybe ("<no "<>k<>">") $
+                   textValueF $
+                   safeHead $
+                   filter ((== k) . iifName) iiField
+    textValueF (Just (iifValue -> J.String t)) = Just t
+    textValueF _                               = Nothing
+    issueId' = getField "projectShortName" <> "-" <>  getField "numberInProject"
+    title = getField "summary"
+
+getIssues :: MonadIO m => H.Manager -> String -> [IssueId] -> m (HM.HashMap IssueId IssueInfo)
+getIssues manager authToken = liftIO . foldM action mempty
+  where
+    action acc issueId = do
+        request <- setHeaders authToken <$> (H.parseRequest $ ytRestEndpoint<> T.unpack issueId)
+        response <- H.httpLbs request manager
+        case processIssue <$> eitherDecode (H.responseBody response) of
+            Left err   -> throw $ ParseError err
+            Right info -> return $ HM.insert issueId info acc

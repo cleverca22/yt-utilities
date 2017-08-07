@@ -25,6 +25,8 @@ import qualified Data.Text.ICU.Regex as R
 import           Data.Time           (Day, UTCTime, defaultTimeLocale, parseTimeM)
 import           Text.Read           (readMaybe)
 
+import           Util                (safeHead)
+
 type Duration = Word
 
 -- | Youtrack project ids.
@@ -130,10 +132,6 @@ parseTimeH (T.unpack -> time) = safeHead $ catMaybes $
     map (\f -> parseTimeM True defaultTimeLocale f time') timeFormats
   where
     time' = foldr (flip replace "") time dayOfWeek
-
-safeHead :: [a] -> Maybe a
-safeHead []    = Nothing
-safeHead (a:_) = Just a
 
 -- Something like
 -- "***** TODO [#A] SRK-X Description with som/e 5 words :maybe?              :tag1:tag2:"
