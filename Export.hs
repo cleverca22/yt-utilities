@@ -116,10 +116,12 @@ formatExportMap ytExport issueInfos hm =
         ]
   where
     longestTableLine = if T.null prettyTable then 0 else maximum (map T.length $ T.lines prettyTable)
-    prettyTable = T.pack $ B.render $
-         B.hsep 2 B.left $
-         map (B.vcat B.left)
-         tableContents
+    prettyTable =
+        T.unlines . map T.stripEnd . T.lines . T.pack $
+        B.render $
+            B.hsep 2 B.left $
+            map (B.vcat B.left)
+            tableContents
 
     tableContents
       | ytExport =
