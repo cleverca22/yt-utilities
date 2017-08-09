@@ -112,8 +112,8 @@ formatExportMap ytExport issueInfos hm =
       else
         [ prettyTable
         , T.pack (replicate longestTableLine '-')
-        , "Total time: \n"
-        , T.pack (formatDuration totalDuration) <> "\n"
+        , "Total time:"
+        , T.pack (formatDuration totalDuration)
         , T.pack (showFFloat (Just 2) (fromIntegral totalDuration / 60) "") <> "h"
         ]
   where
