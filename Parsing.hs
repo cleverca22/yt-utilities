@@ -137,7 +137,7 @@ parseTimeH (T.unpack -> time) = safeHead $ catMaybes $
 -- "***** TODO [#A] SRK-X Description with som/e 5 words :maybe?              :tag1:tag2:"
 issueRegexpText :: Text
 issueRegexpText =
-    "^(?:\\**)\\s*(?:"<>todokws<>")?\\s*(?:\\[#\\w\\])?\\s*((?:"<>projects<>")-\\d+)?\\s*((?:.)*?)\\s*(?:(?::\\w+)+:)?$"
+    "^(?:\\**)\\s*(?:(?:"<>todokws<>")\\s+)?\\s*(?:\\[#\\w\\])?\\s*((?:"<>projects<>")-\\d+)?\\s*((?:.)*?)\\s*(?:(?::\\w+)+:)?$"
   where
     projects = T.intercalate "|" (map T.pack projectNames)
     todokws = T.intercalate "|" (map T.pack keywords)
@@ -166,6 +166,7 @@ emptyParsingCtx = ParsingCtx Nothing Nothing Nothing mempty
 
 parseOrg :: Text -> IO IssueRecordMap
 parseOrg orgFile = do
+    putStrLn $ T.unpack issueRegexpText
     issueReg <- R.regex [R.CaseInsensitive] issueRegexpText
     clockReg <- R.regex [R.CaseInsensitive] clockRegexpText
     trackReg <- R.regex [R.CaseInsensitive] trackRegexpText
