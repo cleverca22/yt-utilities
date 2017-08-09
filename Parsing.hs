@@ -38,7 +38,7 @@ projectNames = [ "CSL", "CSLA", "CSLD", "CSE", "CSM"
 
 -- | Keywords that are commonly used in org-mode.
 keywords :: [String]
-keywords = ["TODO","DONE","STARTED","WIP","WAITING","IN,PROGRESS","CANCELED"
+keywords = ["TODO","DONE","STARTED","WIP","WAITING","IN,PROGRESS","CANCELED", "DAEMON"
            ,"TD","ST","DN","WT","CL"]
 
 data TimeRecord = ClockRecord Text UTCTime UTCTime
