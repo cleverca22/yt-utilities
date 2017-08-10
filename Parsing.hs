@@ -156,10 +156,16 @@ getGroupsFromFirstMatch reg text = do
        else return []
 
 trackRegexpText :: Text
-trackRegexpText = "TRACK:\\s*(\\S*)\\s*(\\S*)"
+trackRegexpText = trackPrefix <> "\\s*(\\S*)\\s*(\\S*)"
 
 clockRegexpText :: Text
-clockRegexpText = "CLOCK:\\s*\\[([^\\]]+)\\]\\s*-{1,}\\s*\\[([^\\]]+)\\]"
+clockRegexpText = clockPrefix <> "\\s*\\[([^\\]]+)\\]\\s*-{1,}\\s*\\[([^\\]]+)\\]"
+
+trackPrefix :: Text
+trackPrefix = "TRACK:"
+
+clockPrefix :: Text
+clockPrefix = "CLOCK:"
 
 emptyParsingCtx :: R.Regex -> R.Regex -> R.Regex -> ParsingCtx
 emptyParsingCtx = ParsingCtx Nothing Nothing Nothing mempty
@@ -250,19 +256,24 @@ parseOrgLine ctx@ParsingCtx{..} line = do
             (Just (depth, issueId, _), Just record) ->
                  pure ctx { pcResult = insertToMap issueId record pcResult }
             -- Everything else, we do not care.
-            _ -> pure ctx
+            _ ->
+                if clockPrefix `isSubstring` line || trackPrefix `isSubstring` line
+                   then error $ "Ambigious line: " <> show line <> ", most probably there is an error in syntax"
+                   else pure ctx
     -- Skipping
     (Nothing, Nothing) -> pure ctx
   where
     processHeaderInNonYT headerDepth ctx' = do
-        let isYTSectionMarker = not . T.null $ snd $ T.breakOn ytParsingCtxTag line
-        if isYTSectionMarker
+        if ytParsingCtxTag `isSubstring` line
            then processHeader headerDepth (ctx' { pcYTSection = Just headerDepth }) line
            else return ctx'
     headerDepthM :: Maybe Int
     headerDepthM
         |"*" `T.isPrefixOf` line = Just $ T.length $ T.takeWhile (== '*') line
         | otherwise = Nothing
+
+isSubstring :: Text -> Text -> Bool
+needle `isSubstring` haystack = not . T.null $ snd $ T.breakOn needle haystack
 
 getFstMatch :: R.Regex -> Text -> IO (Maybe Text)
 getFstMatch reg line = f <$> getGroupsFromFirstMatch reg line
