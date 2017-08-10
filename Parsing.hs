@@ -75,22 +75,24 @@ data ParsingCtx = ParsingCtx
     , trackRegex    :: R.Regex
     }
 
-timeFormats :: [String]
-timeFormats = ["%F %T", "%F %R"]
+parseDayH :: Text -> Maybe Day
+parseDayH (T.unpack -> time) = safeHead $ catMaybes $
+    map (\f -> parseTimeM True defaultTimeLocale f time) dayFormats
+  where
+    dayFormats = ["%F"]
 
-dayFormats :: [String]
-dayFormats = ["%F"]
-
-dayOfWeek :: [String]
-dayOfWeek =
-    [ "Mon", "Monday"
-    , "Tue", "Tuesday"
-    , "Wed", "Wednesday"
-    , "Thu", "Thursday"
-    , "Fri", "Friday"
-    , "Sat", "Saturday"
-    , "Sun", "Sunday"
-    ]
+parseTimeH :: Text -> Maybe UTCTime
+parseTimeH time = timeWithNoWeekDay >>= tryParseTime
+  where
+    timeFormats = ["%F %T", "%F %R"]
+    tryParseTime time' = safeHead $ catMaybes $
+        map (\f -> parseTimeM True defaultTimeLocale f time') timeFormats
+    timeTrimmed = T.dropWhile isSpace $ T.dropWhileEnd isSpace time
+    timeParts = T.words timeTrimmed
+    timeWithNoWeekDay = T.unpack <$> case timeParts of
+              (d:t:[])   -> pure $ d <> " " <> t
+              (d:_:t:[]) -> pure $ d <> " " <> t
+              _          -> Nothing
 
 parseDurationH :: Text -> Maybe Duration
 parseDurationH (convertDurPair -> (h, m)) = f <$> h <*> m
@@ -122,16 +124,6 @@ formatDuration minutesN =
     minutesN3 = minutesN2 `mod` (8 * 60)
     hoursN = minutesN3 `div` 60
     minutesN4 = minutesN3 `mod` 60
-
-parseDayH :: Text -> Maybe Day
-parseDayH (T.unpack -> time) = safeHead $ catMaybes $
-    map (\f -> parseTimeM True defaultTimeLocale f time) dayFormats
-
-parseTimeH :: Text -> Maybe UTCTime
-parseTimeH (T.unpack -> time) = safeHead $ catMaybes $
-    map (\f -> parseTimeM True defaultTimeLocale f time') timeFormats
-  where
-    time' = foldr (flip replace "") time dayOfWeek
 
 -- Something like
 -- "***** TODO [#A] SRK-X Description with som/e 5 words :maybe?              :tag1:tag2:"
